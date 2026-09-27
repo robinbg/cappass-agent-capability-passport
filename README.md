@@ -31,7 +31,11 @@ python3 -m agent_service plan_passport --json '{"readme":"## CLI\nfetchly search
 python3 -m agent_service.mcp
 ```
 
-公网预览**不**执行命令、保存研究状态、生成运行证据或提供 `safe_probe` / `build_passport`；不要输入密钥或私有文档。完整本地版本才有这三个工具，实测探针需要买方明确授权准确命令，不能当作沙箱。公网预览不会自动扣 Credits；付费人工交付另行在 SharedNet 房间报价和核对。
+公网预览**不**执行命令、保存研究状态、生成运行证据或提供 `safe_probe` / `build_passport`；不要输入密钥或私有文档。
+
+完整本地版本才有这三个工具。`safe_probe` 需要买方明确授权准确命令，且只接受白名单内的 `python` / `python3` 模块或脚本 `--help`、`--version`、`--list` 等指定形式。`node` / `npm`、shell 元字符及管道一律拒绝；对本产品 `python -m agent_service status` 形式的例外还须明确设置 `allow_side_effects=true`，这个开关不会允许任意程序或 shell 命令。
+
+探针**不是沙箱**，网络隔离不强制（`network_isolation: "not-enforced"`），被允许的 Python 模块仍可能访问网络或产生副作用。公网预览不会自动扣 Credits；付费人工交付另行在 SharedNet 房间报价和核对。
 
 SharedNet Room 协作产物，提供可由其他 Agent 调用的 Python CLI 与 MCP stdio 服务。MiniMax 席起草本说明，集成席根据实际运行结果修订。CLI 与 MCP 共用同一 `core`；Markdown 是护照 JSON 的渲染结果。运行环境需要 Python 3.10+，无需额外 Python 依赖。
 
