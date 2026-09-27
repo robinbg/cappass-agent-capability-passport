@@ -27,6 +27,11 @@ from uuid import uuid4
 
 _OUTPUT_LIMIT = 32 * 1024
 _MAX_COMMAND_LENGTH = 4096
+_MAX_LOCK_BYTES = 5 * 1024 * 1024
+_LOCKFILE_NAMES = (
+    "uv.lock", "poetry.lock", "Pipfile.lock", "pdm.lock",
+    "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "Cargo.lock",
+)
 _MODULE = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\Z", re.ASCII)
 _FORBIDDEN = re.compile(r"[;&|<>`$(){}~*!?\x00-\x1f\\]")
 _SECRETS = (
@@ -44,6 +49,55 @@ def _redact(value: str) -> str:
     value = _SECRETS[0].sub("[REDACTED]", value)
     value = _SECRETS[1].sub("Bearer [REDACTED]", value)
     return _SECRETS[2].sub(lambda match: match.group(1) + "[REDACTED]", value)
+
+
+def _source_identity(cwd: Path, env: dict[str, str]) -> dict[str, Any]:
+    """Observe local revision and one dependency lock; this is not attestation.
+
+    Git HEAD describes a commit, not the working tree. A lock digest describes
+    only the selected file, not installed dependencies or runtime state.
+    """
+    git_head: str | None = None
+    root = cwd
+    try:
+        git = subprocess.run(
+            ["git", "-C", str(cwd), "rev-parse", "--show-toplevel", "HEAD"],
+            capture_output=True, text=True, timeout=2, check=False,
+            env={**env, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull},
+        )
+        lines = git.stdout.splitlines()
+        if git.returncode == 0 and len(lines) == 2 and re.fullmatch(r"[0-9a-f]{40,64}", lines[1]):
+            candidate = Path(lines[0]).resolve()
+            if cwd.is_relative_to(candidate):
+                root, git_head = candidate, lines[1]
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+    lock: dict[str, str] | None = None
+    lock_status = "missing"
+    for name in _LOCKFILE_NAMES:
+        path = root / name
+        if not path.is_file() or not path.resolve().is_relative_to(root):
+            continue
+        try:
+            if path.stat().st_size > _MAX_LOCK_BYTES:
+                lock_status = "oversized"
+                break
+            lock = {"path": name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+            lock_status = "observed"
+            break
+        except OSError:
+            lock_status = "unreadable"
+            break
+    return {
+        "git_head": git_head,
+        "dependency_lock": lock,
+        "lock_status": lock_status,
+        "coverage": ("git-head-and-lock" if git_head and lock else
+                     "git-head-only" if git_head else "lock-only" if lock else "missing"),
+        "trust": "local-unattested",
+        "working_tree": "not-checked",
+    }
 
 
 def _validate(command: str, cwd: Path, allow_side_effects: bool) -> tuple[list[str], str]:
@@ -214,13 +268,15 @@ def safe_probe(arguments: dict[str, Any]) -> dict[str, Any]:
     fingerprint = hashlib.sha256(
         json.dumps(environment_identity, sort_keys=True).encode("utf-8")
     ).hexdigest()
+    source_identity = _source_identity(cwd, env)
     evidence: list[dict[str, Any]] = []
     rejected: list[dict[str, str]] = []
     probe_id, timestamp = uuid4().hex, _now()
     result = {
         "probe_id": probe_id,
         "ts": timestamp,
-        "envelope": {"probe_id": probe_id, "ts": timestamp, "env_fingerprint": fingerprint},
+        "envelope": {"probe_id": probe_id, "ts": timestamp, "env_fingerprint": fingerprint,
+                     "source_identity": source_identity},
         "evidence": evidence,
         "rejected": rejected,
     }
@@ -264,6 +320,7 @@ def safe_probe(arguments: dict[str, Any]) -> dict[str, Any]:
             "sha256": digest,
             "duration_ms": round((time.monotonic() - started) * 1000),
             "env_fingerprint": fingerprint,
+            "source_identity": source_identity,
             "redacted": True,
             "network_isolation": "not-enforced",
             "timestamp": _now(),

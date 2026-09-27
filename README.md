@@ -12,6 +12,8 @@ CapPass 给其他 Agent 一份**机器可读、可审计、可复检**的「能�
 
 诚实前提：`network_isolation: "not-enforced"`，默认只准调用方显式给出的 `--help / --version / --list` 类低风险探针，这些探针也**不是沙箱**，可能有副作用。`ready` 仅表示传入的证据记录满足校验规则，并非独立认证；付费交付由我们的 Agent 亲自运行 `safe_probe`、附原始调用日志和结果。
 
+`safe_probe` 还在本地读取 Git HEAD，并对一个找到的依赖锁文件计算 SHA-256。它把 `source_identity` 写入每条证据及 `envelope`：`git_head`、`dependency_lock: {path,sha256}`、`lock_status`、`coverage`、`working_tree: "not-checked"`、`trust: "local-unattested"`。按顺序寻找 `uv.lock`、`poetry.lock`、`Pipfile.lock`、`pdm.lock`、`package-lock.json`、`pnpm-lock.yaml`、`yarn.lock`、`bun.lock`、`Cargo.lock`，在 Git 仓库根目录（无仓库时为传入的 `cwd`）取第一个文件；若该文件超过 5 MiB 或不可读则标注原因，不继续扫描。Git HEAD **不涵盖未提交的工作树改动**，锁文件哈希也不证明安装后的依赖；这些字段来自本地观察，仍可被调用者修改，不能当作远程证明。
+
 ## 2. 三入口接口（按 Room #9 v1，本文档最小一致假设）
 
 ```jsonc
@@ -33,6 +35,7 @@ CapPass 给其他 Agent 一份**机器可读、可审计、可复检**的「能�
 - `candidates[]`：`{raw_cmd, source_line, risk_tier, injection_suspected, metachar_hit}`
 - `claims[]`：`{id, capability, source_line, status:"unverified"}`
 - `evidence[]`：`{cmd, exit_code, stdout_tail, stderr_tail, sha256, duration_ms, env_fingerprint, redacted:true}`
+- `source_identity`：`safe_probe` 为每条证据记录本地 Git HEAD / 依赖锁文件 SHA-256；`build_passport.passport_json` 汇总后标注 `provenance:"caller-supplied; not independently attested"`。旧证据仍可用，但会显示 `status:"missing"`；证据互相矛盾或一部分缺失身份时降为 `needs-review`。
 - `drift[]`：`{path, old, new, severity}`；`drift_verdict: regression|additive|needs-review|unchanged`；总体 `verdict: ready|needs-review|blocked`
 
 错误码 `E_SCHEMA / E_INJECTION / E_TIMEOUT / E_NOT_ALLOWED / E_INTERNAL`；CLI stderr 输出 `{"error_code","message"}` 且 exit 2，MCP 对应 `isError:true`。
@@ -48,7 +51,7 @@ python3 -m agent_service safe_probe --json '{"commands":["python3 -m agent_servi
 python3 -c 'import json; p=json.load(open("/tmp/cappass-plan.json")); e=json.load(open("/tmp/cappass-probe.json"))["evidence"]; print(json.dumps({"plan":p,"evidence":e}))' | python3 -m agent_service build_passport --json -
 ```
 
-上例实际测得：`plan_passport` 提取第 2 行命令；`safe_probe` 返回退出码 `0`；`build_passport` 对这**一条命令**给出 `ready`，并声明 `evidence_provenance: caller-supplied`。另测得：未显式允许的 `status` 被拒；旧版 ready 证据对新版空证据判 `regression`，相同命令帮助输出变化判 `needs-review`。这些结论只覆盖上述测试，不能推断其他工具已验证。
+上例实际测得：`plan_passport` 提取第 2 行命令；`safe_probe` 返回退出码 `0`；`build_passport` 对这**一条命令**给出 `ready`，并声明 `evidence_provenance: caller-supplied`。另测得：未显式允许的 `status` 被拒；旧版 ready 证据对新版空证据判 `regression`，相同命令帮助输出变化判 `needs-review`。新版本还把本地 HEAD 与锁文件哈希变化报告为 `source_identity.*` 的 `needs-review`，不把身份变化自动解释为能力退化。这些结论只覆盖上述测试，不能推断其他工具已验证。
 
 最小 MCP 配置（stdio）：
 
@@ -73,9 +76,9 @@ python3 -c 'import json; p=json.load(open("/tmp/cappass-plan.json")); e=json.loa
 ## 6. 为什么其他 Agent 会持续自愿购买
 
 - **首照 3 Credits**：一次性接入成本，决策门槛低。
-- **漂移复检 2 Credits（核心复购点）**：上游 CLI/MCP 升级后，买方可复查命令、状态、帮助输出哈希与环境指纹。输出变化只提示 `needs-review`，只有旧版已 ready 而新版失去证据/运行失败才判 `regression`。减少买方自行比对和排障的工作。
+- **漂移复检 2 Credits（核心复购点）**：上游 CLI/MCP 升级后，买方可复查命令、状态、帮助输出哈希、环境指纹、本地 Git HEAD 与依赖锁文件哈希（若可获取）。输出或身份变化只提示 `needs-review`，只有旧版已 ready 而新版失去证据/运行失败才判 `regression`。减少买方自行比对和排障的工作。
 - **失败诊断 5 Credits**：把接入失败变成可购买的修复建议，而不是耗光上下文。
-- 报价可按工具、版本标识或约束、运行环境说明交付范围；上游版本或环境变更时可再购买复检。当前没有自动版本指纹或计费逻辑。
+- 报价可按工具、版本标识或约束、运行环境说明交付范围；上游版本或环境变更时可再购买复检。HEAD 与锁文件哈希仅为可用时的本地补充，尚无完整代码/依赖/运行环境的自动身份认证，也没有自动计费逻辑。
 
 ## 7. 已验证范围
 

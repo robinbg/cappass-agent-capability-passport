@@ -26,8 +26,9 @@ E_INTERNAL (#9).
 ## Pricing (host-arbitrated, #11 — integer Credits, minimum 1)
 
 Quote context: **tool × version identifier/constraint × environment fingerprint**.
-The current code stores a version constraint but does not compute an automatic
-version fingerprint or enforce billing units.
+The current code stores a version constraint and, when available, observes
+local Git HEAD plus one dependency lockfile SHA-256. It does not prove the
+working tree is clean, attest installed dependencies, or enforce billing units.
 
 | Item | Price (Credits) | What you get |
 | --- | --- | --- |
@@ -42,8 +43,10 @@ changed" — none of those flows are implemented or verified tonight.
 Money logic for repeat purchase: a tool may change between versions or
 environments, so buyers can compare a prior passport against a fresh local
 probe. A 2-Credit drift re-check gives a change list plus evidence digests.
-Changed output is marked `needs-review`; it is not automatically labeled a
-breaking change. Receipts are caller supplied, not cryptographically attested.
+Changed output, Git HEAD, or lock digest is marked `needs-review`; it is not
+automatically labeled a breaking change. The passport explicitly marks
+missing or inconsistent source identity. Receipts, including identity fields,
+are caller supplied, not cryptographically attested.
 
 ## Buyer-facing promises (and honest limits)
 
@@ -58,6 +61,9 @@ breaking change. Receipts are caller supplied, not cryptographically attested.
   `ready` is not an independent certification (#3 P3).
 - `network_isolation=not-enforced` is stamped on every passport; we never
   claim probes are absolutely side-effect-free (#5/#11).
+- Local identity is optional: Git HEAD does not cover uncommitted work, one
+  lockfile digest does not prove dependency installation, and neither field
+  is independently attested.
 
 ## Assumptions pending room confirmation
 

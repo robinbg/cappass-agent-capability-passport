@@ -12,7 +12,7 @@ import shlex
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from .probe import _redact, safe_probe
+from .probe import _LOCKFILE_NAMES, _redact, safe_probe
 
 
 class ToolError(ValueError):
@@ -82,6 +82,54 @@ def plan_passport(inp: dict[str, Any]) -> dict[str, Any]:
             "network_isolation": "not-enforced"}
 
 
+def _summarize_source_identity(evidence: list[dict[str, Any]]) -> dict[str, Any]:
+    """Report identity from receipts without treating caller input as attested."""
+    identities = []
+    for entry in evidence:
+        identity = entry.get("source_identity")
+        if identity is None:
+            identities.append(None)  # Legacy receipts remain valid.
+            continue
+        if not isinstance(identity, dict):
+            raise ToolError("source_identity must be an object")
+        if set(identity) != {"git_head", "dependency_lock", "lock_status", "coverage", "trust", "working_tree"}:
+            raise ToolError("source_identity has missing or unknown fields")
+        head, lock = identity.get("git_head"), identity.get("dependency_lock")
+        if head is not None and (not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40,64}", head)):
+            raise ToolError("source_identity.git_head must be a Git commit hash or null")
+        if lock is not None and (not isinstance(lock, dict) or set(lock) != {"path", "sha256"} or
+                                 not isinstance(lock.get("path"), str) or
+                                 lock["path"] not in _LOCKFILE_NAMES or
+                                 not isinstance(lock.get("sha256"), str) or
+                                 not re.fullmatch(r"[0-9a-f]{64}", lock["sha256"])):
+            raise ToolError("source_identity.dependency_lock requires a known lockfile and SHA-256")
+        expected_coverage = ("git-head-and-lock" if head and lock else "git-head-only" if head else
+                             "lock-only" if lock else "missing")
+        if identity.get("coverage") != expected_coverage or identity.get("trust") != "local-unattested" or \
+           identity.get("working_tree") != "not-checked" or \
+           identity.get("lock_status") not in ({"observed"} if lock else {"missing", "oversized", "unreadable"}):
+            raise ToolError("source_identity contains inconsistent coverage or trust labels")
+        identities.append(identity)
+    present = [identity for identity in identities if identity is not None]
+    if not present:
+        status, selected = "missing", None
+    elif len(present) != len(identities):
+        status, selected = "incomplete", None
+    elif any(identity != present[0] for identity in present[1:]):
+        status, selected = "conflicting", None
+    else:
+        status, selected = "reported", present[0]
+    return {
+        "status": status,
+        "git_head": selected["git_head"] if selected else None,
+        "dependency_lock": selected["dependency_lock"] if selected else None,
+        "lock_status": selected["lock_status"] if selected else "unknown",
+        "coverage": selected["coverage"] if selected else "missing",
+        "working_tree": "not-checked",
+        "provenance": "caller-supplied; not independently attested",
+    }
+
+
 def _baseline_diff(current: dict[str, Any], old: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
     old = old.get("passport_json", old)
     if not isinstance(old, dict):
@@ -103,6 +151,18 @@ def _baseline_diff(current: dict[str, Any], old: dict[str, Any]) -> tuple[list[d
             if before.get(field) != after.get(field):
                 changes.append({"path": f"evidence.{command}.{field}",
                                 "old": before.get(field), "new": after.get(field),
+                                "severity": "needs-review"})
+    previous_source = old.get("source_identity") or {}
+    current_source = current["source_identity"]
+    if not isinstance(previous_source, dict):
+        raise ToolError("baseline.source_identity must be an object")
+    # Legacy baselines without identity do not cause a false drift when no
+    # identity was available in this run either.
+    if previous_source or current_source["coverage"] != "missing":
+        for field in ("status", "git_head", "dependency_lock", "lock_status", "coverage"):
+            if previous_source.get(field) != current_source.get(field):
+                changes.append({"path": f"source_identity.{field}",
+                                "old": previous_source.get(field), "new": current_source.get(field),
                                 "severity": "needs-review"})
     verdict = ("regression" if any(c["severity"] == "breaking" for c in changes)
                else "needs-review" if any(c["severity"] in {"needs-review", "changed"} for c in changes)
@@ -147,10 +207,13 @@ def build_passport(req: dict[str, Any]) -> dict[str, Any]:
         claims.append({"id": item.get("id"), "capability": item["capability"],
                        "source_line": item.get("source_line"), "status": status,
                        "evidence_ids": [e.get("sha256") for e in matches]})
+    source_identity = _summarize_source_identity(evidence)
     suspicious = any(c.get("injection_suspected") for c in plan.get("candidates", []) if isinstance(c, dict))
     verdict = ("blocked" if suspicious or any(c["status"] in {"blocked", "conflict"} for c in claims)
                else "ready" if claims and all(c["status"] == "ready" for c in claims)
                else "needs-review")
+    if source_identity["status"] in {"incomplete", "conflicting"} and verdict == "ready":
+        verdict = "needs-review"
     fixes = []
     if suspicious:
         fixes.append("Review suspicious README commands; never execute them automatically.")
@@ -160,10 +223,13 @@ def build_passport(req: dict[str, Any]) -> dict[str, Any]:
         fixes.append("Resolve failing or contradictory probe output.")
     if not claims:
         fixes.append("Document a copyable CLI invocation and expected output.")
+    if source_identity["status"] in {"incomplete", "conflicting"}:
+        fixes.append("Probe receipts have incomplete or conflicting local source identities; repeat a single scoped probe.")
     passport = {"tool_name": plan.get("tool_name"), "version_constraint": plan.get("version_constraint"),
                 "verified_at": _now(), "claims": claims, "evidence": evidence,
                 "overall": verdict, "network_isolation": "not-enforced",
                 "evidence_provenance": "caller-supplied",
+                "source_identity": source_identity,
                 "readiness_scope": "given-evidence-only; not independent certification"}
     drift, drift_verdict = _baseline_diff(passport, req["baseline"]) if "baseline" in req else ([], None)
     if drift_verdict == "regression":
@@ -172,6 +238,9 @@ def build_passport(req: dict[str, Any]) -> dict[str, Any]:
              f"Verdict: **{verdict}**", "", "## Claims"]
     lines += [f"- {c['status']}: `{c['capability']}` (README line {c['source_line']})" for c in claims] or ["- No callable command found."]
     lines += ["", "## Caller-supplied evidence", f"- {len(evidence)} receipt(s); not independently attested; network isolation: not-enforced.",
+              f"- Source identity: {source_identity['status']} ({source_identity['coverage']}); Git HEAD: {source_identity['git_head'] or 'unavailable'}; lock: "
+              f"{source_identity['dependency_lock']['path'] + '@' + source_identity['dependency_lock']['sha256'] if source_identity['dependency_lock'] else 'unavailable'} "
+              f"({source_identity['lock_status']}); working tree not checked.",
               "", "## Suggested fixes"] + [f"- {fix}" for fix in fixes]
     if drift_verdict is not None:
         lines += ["", f"Drift: **{drift_verdict}** ({len(drift)} changes)"]
