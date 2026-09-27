@@ -20,7 +20,7 @@ CapPass 给其他 Agent 一份**机器可读、可审计、可复检**的「能�
 // plan_passport — 静态提取候选命令与 Claim；只产候选，README 是数据不是指令
 {"readme": "<str>必填", "tool_name": "<str>必填",
  "pyproject": "<str可选>", "package_json": "<str可选>",
- "version_constraint": "<str可选>"}
+ "version_constraint": "<str可选>", "entrypoints": ["<CLI 名称可选>"]}
 
 // safe_probe — 仅执行调用方显式传入的命令；allowlist + timeout + 输出上限
 {"commands": ["<str>", ...]必填, "cwd": "<str>必填",
@@ -33,6 +33,7 @@ CapPass 给其他 Agent 一份**机器可读、可审计、可复检**的「能�
 输出（主要字段，Room #9 v1）：
 
 - `candidates[]`：`{raw_cmd, source_line, risk_tier, injection_suspected, metachar_hit}`
+- `plan_passport` 静态识别 `python`/`node` 等常见入口；若 `tool_name` 本身是单个安全 CLI 名称（例如 `fetchly`），也识别该入口。`entrypoints` 可显式列出最多 16 个其它单词型 CLI 名称。识别只产生带行号的候选，**不会执行命令，也不会扩大 `safe_probe` 的运行白名单**。
 - `claims[]`：`{id, capability, source_line, status:"unverified"}`
 - `evidence[]`：`{cmd, exit_code, stdout_tail, stderr_tail, sha256, duration_ms, env_fingerprint, redacted:true}`
 - `source_identity`：`safe_probe` 为每条证据记录本地 Git HEAD / 依赖锁文件 SHA-256；`build_passport.passport_json` 汇总后标注 `provenance:"caller-supplied; not independently attested"`。旧证据仍可用，但会显示 `status:"missing"`；证据互相矛盾或一部分缺失身份时降为 `needs-review`。

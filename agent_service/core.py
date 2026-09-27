@@ -25,7 +25,8 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-_COMMAND = re.compile(r"^(?:\$\s*)?(?:python3?|node|npx|uv|docker|curl|wget)\b")
+_BASE_ENTRYPOINTS = ("python", "python3", "node", "npx", "uv", "docker", "curl", "wget")
+_CLI_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}\Z", re.ASCII)
 _SUSPECT = re.compile(r"[;|&$><`{}()~*!?\\]|ignore (?:all )?(?:previous|prior) instructions|"
                       r"\bcurl\b|\bwget\b|\brm\s+-|\bchmod\b|\bpip\s+install\b", re.I)
 _ENV = re.compile(r"\b[A-Z][A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)\b")
@@ -39,6 +40,13 @@ def plan_passport(inp: dict[str, Any]) -> dict[str, Any]:
     name = inp["tool_name"].strip()
     if not name:
         raise ToolError("tool_name cannot be empty")
+    explicit = inp.get("entrypoints", [])
+    if (not isinstance(explicit, list) or len(explicit) > 16 or
+            any(not isinstance(value, str) or not _CLI_NAME.fullmatch(value) for value in explicit)):
+        raise ToolError("entrypoints must be at most 16 CLI names without spaces or shell syntax")
+    names = (*_BASE_ENTRYPOINTS, *([name] if _CLI_NAME.fullmatch(name) else []), *explicit)
+    entrypoints = tuple(dict.fromkeys(names))
+    command = re.compile(r"^(?:\$\s*)?(?:" + "|".join(re.escape(value) for value in entrypoints) + r")(?=\s|$)")
     candidates: list[dict[str, Any]] = []
     claims: list[dict[str, Any]] = []
     notes: list[dict[str, Any]] = []
@@ -50,13 +58,13 @@ def plan_passport(inp: dict[str, Any]) -> dict[str, Any]:
         if stripped.startswith("```"):
             continue
         snippets = [m.group(1).strip() for m in re.finditer(r"`([^`]+)`", line)]
-        if _COMMAND.search(stripped):
+        if command.search(stripped):
             snippets.insert(0, stripped.removeprefix("$ "))
         if not snippets and _SUSPECT.search(line):
             notes.append({"source_line": line_number, "text": _redact(line[:300]),
                           "injection_suspected": True})
         for snippet in dict.fromkeys(snippets):
-            if not _COMMAND.search(snippet):
+            if not command.search(snippet):
                 continue
             suspicious = bool(_SUSPECT.search(snippet))
             raw = _redact(snippet[:1000])
@@ -75,6 +83,7 @@ def plan_passport(inp: dict[str, Any]) -> dict[str, Any]:
                         and parts[1] == "-m" and re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\.mcp", parts[2])):
                     mcp_candidate = {"command": parts[0], "args": parts[1:], "cwd": None}
     return {"tool_name": name, "version_constraint": inp.get("version_constraint"),
+            "entrypoints": list(entrypoints),
             "candidates": candidates, "claims": claims,
             "env_vars": [{"name": n, "required": None, "redacted_hint": "value never captured"}
                          for n in sorted(env_names)],
@@ -256,7 +265,8 @@ TOOLS: dict[str, dict[str, Any]] = {
     "plan_passport": {"description": "Extract untrusted, unexecuted CLI/MCP candidates from README text.",
                       "inputSchema": _schema({"readme": {"type": "string"}, "tool_name": {"type": "string"},
                                               "pyproject": {"type": "string"}, "package_json": {"type": "string"},
-                                              "version_constraint": {"type": "string"}}, ["readme", "tool_name"]),
+                                              "version_constraint": {"type": "string"},
+                                              "entrypoints": {"type": "array", "items": {"type": "string"}}}, ["readme", "tool_name"]),
                       "handler": plan_passport},
     "safe_probe": {"description": "Run caller-supplied, low-risk local probes with limits; this is not a sandbox.",
                    "inputSchema": _schema({"commands": {"type": "array", "items": {"type": "string"}},
@@ -298,7 +308,7 @@ def call_tool(name: str, arguments: dict[str, Any]) -> Any:
             raise ToolError(f"{key} must be a string")
         if typ == "object" and not isinstance(value, dict):
             raise ToolError(f"{key} must be an object")
-        if typ == "array" and (not isinstance(value, list) or any(not isinstance(x, str if key == "commands" else dict) for x in value)):
+        if typ == "array" and (not isinstance(value, list) or any(not isinstance(x, str if definition["items"]["type"] == "string" else dict) for x in value)):
             raise ToolError(f"{key} must be an array of {definition['items']['type']}")
     handler: Callable[[dict[str, Any]], Any] = tool["handler"]
     return handler(arguments)
