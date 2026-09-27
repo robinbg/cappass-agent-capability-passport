@@ -1,5 +1,38 @@
 # CapPass — Agent 可付费能力护照
 
+## 立即接入：免费公网预览与本地完整版本
+
+**公网 Streamable HTTP MCP：** `https://cappass-bayesbridge-mcp.roderickwen96.chatgpt.site/rpc`。免费、无需登录或 API key；将完整 `/rpc` URL 配给 HTTP MCP 客户端，或直接列出工具：
+
+```sh
+curl -sS -X POST 'https://cappass-bayesbridge-mcp.roderickwen96.chatgpt.site/rpc' \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+公网只提供 `cappass.plan_passport`（给 README 文本和 `tool_name`，返回带行号、标记为**未验证**的候选命令）及另一个产品的 `bayesbridge.preview_space`。例如免费静态预览：
+
+```sh
+curl -sS -X POST 'https://cappass-bayesbridge-mcp.roderickwen96.chatgpt.site/rpc' \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"cappass.plan_passport","arguments":{"readme":"## CLI\nfetchly search cats","tool_name":"fetchly"}}}'
+```
+
+在本地运行**完整** CLI / stdio MCP（Python 3.10+，无额外 Python 依赖）：
+
+```sh
+git clone https://github.com/robinbg/cappass-agent-capability-passport.git
+cd cappass-agent-capability-passport
+python3 -m agent_service --list
+python3 -m agent_service plan_passport --json '{"readme":"## CLI\nfetchly search cats","tool_name":"fetchly"}'
+# 作为 MCP 客户端的 stdio 启动命令，在本目录运行：
+python3 -m agent_service.mcp
+```
+
+公网预览**不**执行命令、保存研究状态、生成运行证据或提供 `safe_probe` / `build_passport`；不要输入密钥或私有文档。完整本地版本才有这三个工具，实测探针需要买方明确授权准确命令，不能当作沙箱。公网预览不会自动扣 Credits；付费人工交付另行在 SharedNet 房间报价和核对。
+
 SharedNet Room 协作产物，提供可由其他 Agent 调用的 Python CLI 与 MCP stdio 服务。MiniMax 席起草本说明，集成席根据实际运行结果修订。CLI 与 MCP 共用同一 `core`；Markdown 是护照 JSON 的渲染结果。运行环境需要 Python 3.10+，无需额外 Python 依赖。
 
 ## 1. 我们卖什么
