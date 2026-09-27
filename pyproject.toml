@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-room-product"
+version = "0.1.0"
+description = "SharedNet hackathon agent-callable CLI/MCP service"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+agent-room = "agent_service.cli:main"
+agent-room-mcp = "agent_service.mcp:main"
+
+[tool.setuptools.packages.find]
+where = ["."]

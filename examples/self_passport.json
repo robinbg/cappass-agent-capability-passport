@@ -1,0 +1,44 @@
+{
+  "passport_json": {
+    "tool_name": "CapPass",
+    "version_constraint": null,
+    "verified_at": "2026-09-27T10:57:22.113819+00:00",
+    "claims": [
+      {
+        "id": "c_1",
+        "capability": "python3 -m agent_service --list",
+        "source_line": 2,
+        "status": "ready",
+        "evidence_ids": [
+          "d91caf9b54b0dc816f557643f85c09589b8a9f14ba39b6315b34e72601d27b21"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "cmd": "python3 -m agent_service --list",
+        "exit_code": 0,
+        "stdout_tail": "{\"plan_passport\":{\"description\":\"Extract untrusted, unexecuted CLI/MCP candidates from README text.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"readme\":{\"type\":\"string\"},\"tool_name\":{\"type\":\"string\"},\"pyproject\":{\"type\":\"string\"},\"package_json\":{\"type\":\"string\"},\"version_constraint\":{\"type\":\"string\"}},\"required\":[\"readme\",\"tool_name\"],\"additionalProperties\":false}},\"safe_probe\":{\"description\":\"Run caller-supplied, low-risk local probes with limits; this is not a sandbox.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"commands\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"cwd\":{\"type\":\"string\"},\"allow_side_effects\":{\"type\":\"boolean\"},\"timeout\":{\"type\":\"integer\"},\"budget\":{\"type\":\"integer\"}},\"required\":[\"commands\",\"cwd\"],\"additionalProperties\":false}},\"build_passport\":{\"description\":\"Build an evidence-backed passport and optional baseline drift report.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"plan\":{\"type\":\"object\"},\"evidence\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}},\"baseline\":{\"type\":\"object\"}},\"required\":[\"plan\",\"evidence\"],\"additionalProperties\":false}}}\n",
+        "stderr_tail": "",
+        "sha256": "d91caf9b54b0dc816f557643f85c09589b8a9f14ba39b6315b34e72601d27b21",
+        "duration_ms": 47,
+        "env_fingerprint": "4d770dfec6ec9fec4352d3b3c6edf75529b358add2c47de06de31165e2a8d445",
+        "redacted": true,
+        "network_isolation": "not-enforced",
+        "timestamp": "2026-09-27T10:57:22.113Z",
+        "risk_tier": "low",
+        "truncated": false,
+        "timed_out": false
+      }
+    ],
+    "overall": "ready",
+    "network_isolation": "not-enforced",
+    "evidence_provenance": "caller-supplied",
+    "readiness_scope": "given-evidence-only; not independent certification"
+  },
+  "markdown": "# Capability Passport: CapPass\n\nVerdict: **ready**\n\n## Claims\n- ready: `python3 -m agent_service --list` (README line 2)\n\n## Caller-supplied evidence\n- 1 receipt(s); not independently attested; network isolation: not-enforced.\n\n## Suggested fixes\n",
+  "verdict": "ready",
+  "drift": [],
+  "drift_verdict": null,
+  "fix": []
+}
